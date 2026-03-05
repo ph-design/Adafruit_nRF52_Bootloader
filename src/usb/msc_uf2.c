@@ -37,6 +37,7 @@
 /* UF2
  *------------------------------------------------------------------*/
 static WriteState _wr_state = { 0 };
+static bool _exit_requested = false;
 
 void read_block(uint32_t block_no, uint8_t *data);
 int  write_block(uint32_t block_no, uint8_t *data, WriteState *state);
@@ -145,6 +146,11 @@ int32_t tud_msc_write10_cb (uint8_t lun, uint32_t lba, uint32_t offset, uint8_t*
   uint32_t count = 0;
   while ( count < bufsize )
   {
+    // Check if user deleted the STARTAPP file to exit bootloader
+    if ( ghostfat_is_exit_request(lba, buffer) ) {
+      _exit_requested = true;
+    }
+
     // Consider non-uf2 block write as successful
     // only break if write_block is busy with flashing (return 0)
     if ( 0 == write_block(lba, buffer, &_wr_state) ) break;
@@ -161,6 +167,20 @@ int32_t tud_msc_write10_cb (uint8_t lun, uint32_t lba, uint32_t offset, uint8_t*
 void tud_msc_write10_complete_cb(uint8_t lun)
 {
   static bool first_write = true;
+
+  // User deleted STARTAPP file --> exit bootloader and jump to app
+  if ( _exit_requested )
+  {
+    PRINTF("Exit bootloader requested\r\n");
+
+    dfu_update_status_t update_status;
+    memset(&update_status, 0, sizeof(dfu_update_status_t ));
+    update_status.status_code = DFU_RESET;
+    update_status.restart_into_bootloader = false;
+
+    bootloader_dfu_update_process(update_status);
+    return;
+  }
 
   // abort the DFU, uf2 block failed integrity check
   if ( _wr_state.aborted )
@@ -260,7 +280,15 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, boo
       // load disk storage
     }else
     {
-      // unload disk storage
+      // Eject: exit bootloader and jump to app
+      PRINTF("Ejected, exit bootloader\r\n");
+
+      dfu_update_status_t update_status;
+      memset(&update_status, 0, sizeof(dfu_update_status_t));
+      update_status.status_code = DFU_RESET;
+      update_status.restart_into_bootloader = false;
+
+      bootloader_dfu_update_process(update_status);
     }
   }
 

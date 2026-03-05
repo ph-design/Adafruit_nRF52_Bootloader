@@ -143,6 +143,7 @@ const char indexFile[] =
 static struct TextFile const info[] = {
     {.name = "INFO_UF2TXT", .content = infoUf2File},
     {.name = "INDEX   HTM", .content = indexFile},
+    {.name = "STARTAPP   ", .content = ""},
 
     // current.uf2 must be the last element and its content must be NULL
     {.name = "CURRENT UF2", .content = NULL},
@@ -613,4 +614,45 @@ int write_block (uint32_t block_no, uint8_t *data, WriteState *state)
   }
 
   return BPB_SECTOR_SIZE;
+}
+
+/*------------------------------------------------------------------*/
+/* Exit bootloader by deleting STARTAPP file
+ *------------------------------------------------------------------*/
+
+// Index of STARTAPP in the info[] array (0-based)
+#define STARTAPP_FILE_INDEX 2
+
+bool ghostfat_is_exit_request(uint32_t block_no, uint8_t const *data)
+{
+  // Only check writes to root directory sectors
+  if (block_no < FS_START_ROOTDIR_SECTOR ||
+      block_no >= FS_START_CLUSTERS_SECTOR) {
+    return false;
+  }
+
+  uint32_t const dir_sector = block_no - FS_START_ROOTDIR_SECTOR;
+
+  // STARTAPP entry is in the first root directory sector
+  // (volume label occupies entry 0, files start at entry 1)
+  // STARTAPP is at entry index = 1 + STARTAPP_FILE_INDEX = 3
+  if (dir_sector != 0) {
+    return false;
+  }
+
+  // Entry position: volume label (1) + file index
+  uint32_t const entry_idx = 1 + STARTAPP_FILE_INDEX;
+  DirEntry const *d = &((DirEntry const *) data)[entry_idx];
+
+  // Detect if the STARTAPP entry has been modified in any way:
+  // - 0xE5: standard FAT deletion (Linux, Windows, macOS rm)
+  // - 0x05: FAT special case for names starting with 0xE5
+  // - Any other first-byte change: rename (macOS move-to-trash, etc.)
+  if ((uint8_t) d->name[0] != 'S' ||
+      memcmp(&d->name[1], "TARTAPP", 7) != 0 ||
+      memcmp(d->ext, "   ", 3) != 0) {
+    return true;
+  }
+
+  return false;
 }

@@ -80,5 +80,6 @@ typedef struct {
 } UF2_Block;
 
 void uf2_init(void);
+bool ghostfat_is_exit_request(uint32_t block_no, uint8_t const *data);
 
 #endif
